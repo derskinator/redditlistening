@@ -1,73 +1,77 @@
-import requests
+import streamlit as st
+import praw
 import pandas as pd
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 from textblob import TextBlob
-import streamlit as st
 from datetime import datetime
 
+# Streamlit page config
 st.set_page_config(page_title="Reddit Social Listening", layout="wide")
 st.title("🔍 Reddit Social Listening Tool")
 
-# Inputs
-query = st.text_input("Enter keyword or phrase", "rinsekit")
-subreddit = st.text_input("Subreddit (optional)", "camping")
-start_date = st.date_input("Start date", value=datetime(2024, 1, 1))
-end_date = st.date_input("End date", value=datetime.today())
+# Input form
+with st.sidebar:
+    st.header("Search Settings")
+    query = st.text_input("Keyword or phrase", "rinsekit")
+    subreddit = st.text_input("Subreddit (optional)", "camping")
+    post_limit = st.slider("Number of posts to fetch", 10, 100, 50)
 
-# Convert to timestamps
-start_utc = int(pd.Timestamp(start_date).timestamp())
-end_utc = int(pd.Timestamp(end_date).timestamp())
+# Load Reddit credentials from secrets
+client_id = st.secrets["client_id"]
+client_secret = st.secrets["client_secret"]
+user_agent = "reddit-social-listener"
 
-# Search button
-if st.button("Search"):
+# Initialize Reddit client
+reddit = praw.Reddit(
+    client_id=client_id,
+    client_secret=client_secret,
+    user_agent=user_agent
+)
 
-    # Request data from Pushshift
-    base_url = "https://api.pushshift.io/reddit/search/submission/"
-    params = {
-        "q": query,
-        "after": start_utc,
-        "before": end_utc,
-        "subreddit": subreddit if subreddit else None,
-        "sort": "desc",
-        "size": 100
-    }
+# Search and analyze
+if st.button("Search Reddit"):
+    st.info("Fetching posts...")
 
-    st.info("Fetching data from Reddit...")
     try:
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()
-        data = response.json().get("data", [])
-    except Exception as e:
-        st.error(f"API error: {e}")
+        subreddit_obj = reddit.subreddit(subreddit) if subreddit else reddit.subreddit("all")
+        posts = subreddit_obj.search(query, sort="new", limit=post_limit)
         data = []
 
-    if not data:
-        st.warning("No posts found. Try a broader keyword or remove the subreddit.")
-    else:
-        posts = []
-        for post in data:
-            title = post.get("title", "")
+        for post in posts:
+            title = post.title
             sentiment = TextBlob(title).sentiment.polarity
-            posts.append({
+            data.append({
                 "Title": title,
                 "Sentiment": sentiment,
-                "Subreddit": post.get("subreddit", ""),
-                "Date": pd.to_datetime(post.get("created_utc", 0), unit="s"),
-                "URL": post.get("full_link", "")
+                "Subreddit": post.subreddit.display_name,
+                "Date": datetime.fromtimestamp(post.created_utc),
+                "URL": f"https://reddit.com{post.permalink}"
             })
 
-        df = pd.DataFrame(posts)
-        st.success(f"Found {len(df)} posts.")
-        st.dataframe(df)
+        if not data:
+            st.warning("No posts found.")
+        else:
+            df = pd.DataFrame(data)
+            st.success(f"Found {len(df)} posts.")
+            st.dataframe(df)
 
-        avg_sentiment = df["Sentiment"].mean()
-        st.metric("Average Sentiment Score", f"{avg_sentiment:.2f}")
+            # Sentiment average
+            avg_sent = df["Sentiment"].mean()
+            st.metric("Average Sentiment", f"{avg_sent:.2f}")
 
-        st.write("### Word Cloud of Post Titles")
-        combined_text = " ".join(df["Title"])
-        wc = WordCloud(width=800, height=400, background_color="white").generate(combined_text)
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.imshow(wc, interpolation="bilinear")
-        ax.axis("off")
-        st.pyplot(fig)
+            # Word Cloud
+            st.write("### Word Cloud of Post Titles")
+            text = " ".join(df["Title"])
+            wc = WordCloud(width=800, height=400, background_color="white").generate(text)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.imshow(wc, interpolation="bilinear")
+            ax.axis("off")
+            st.pyplot(fig)
+
+            # Download CSV
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button("Download CSV", csv, "reddit_search_results.csv", "text/csv")
+
+    except Exception as e:
+        st.error(f"Reddit API error: {e}")
