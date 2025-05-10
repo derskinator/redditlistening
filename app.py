@@ -8,7 +8,7 @@ from collections import Counter
 import nltk
 import re
 
-# Download NLTK stopwords
+# Download stopwords
 nltk.download("stopwords", quiet=True)
 from nltk.corpus import stopwords
 stop_words = set(stopwords.words("english"))
@@ -23,15 +23,40 @@ st.title("🕵️ Reddit Social Listening with VADER Sentiment")
 with st.sidebar:
     st.header("Search Settings")
     query = st.text_input("Exact keyword or phrase", "donald trump")
-    subreddit = st.text_input("Subreddit (e.g., 'politics')", "politics")
-    post_limit = st.slider("Number of posts to scan", 10, 250, 100)
 
+    # Subreddit dropdown + custom input
+    top_subreddits = [
+        "askreddit", "politics", "funny", "worldnews", "gaming", "todayilearned", "science",
+        "news", "aww", "technology", "movies", "explainlikeimfive", "IAmA", "pics", "music",
+        "lifeprotips", "askscience", "books", "sports", "dataisbeautiful", "space", "food",
+        "history", "gadgets", "television", "nosleep", "getmotivated", "personalfinance",
+        "philosophy", "relationship_advice", "writingprompts", "nottheonion", "offmychest",
+        "UpliftingNews", "Art", "fitness", "DIY", "Documentaries", "travel", "creepy",
+        "Futurology", "OutOfTheLoop", "Tinder", "TrueOffMyChest", "Showerthoughts", "Memes",
+        "Cringe", "Marketing", "Entrepreneur", "CryptoCurrency"
+    ]
+
+    subreddit_choice = st.selectbox(
+        "Choose a subreddit",
+        ["🔍 Custom subreddit"] + sorted(top_subreddits),
+        index=sorted(top_subreddits).index("politics") + 1
+    )
+
+    if subreddit_choice == "🔍 Custom subreddit":
+        subreddit = st.text_input("Enter a subreddit name (no r/)", "")
+        if not subreddit.strip():
+            st.warning("Please enter a subreddit or choose one from the list.")
+            st.stop()
+    else:
+        subreddit = subreddit_choice
+
+    post_limit = st.slider("Number of posts to scan", 10, 250, 100)
     today = datetime.today()
     min_date = today - timedelta(days=7)
     start_date = st.date_input("Start date", value=min_date, min_value=min_date, max_value=today)
     end_date = st.date_input("End date", value=today, min_value=min_date, max_value=today)
 
-# Reddit API credentials
+# Reddit credentials
 client_id = st.secrets["client_id"]
 client_secret = st.secrets["client_secret"]
 user_agent = "reddit-sentiment-listener"
@@ -43,10 +68,6 @@ reddit = praw.Reddit(
 )
 
 if st.button("Search Reddit"):
-    if not subreddit.strip():
-        st.error("Please enter a subreddit name.")
-        st.stop()
-
     st.info("Scanning posts and comments...")
 
     start_ts = datetime.combine(start_date, datetime.min.time()).timestamp()
@@ -124,7 +145,7 @@ if st.button("Search Reddit"):
             st.success(f"Displaying {len(df)} results.")
             st.dataframe(df[["Date", "Subreddit", "Mention Type", "Text", "Sentiment", "URL"]])
 
-            # Average sentiment
+            # Sentiment average
             avg_sent = df["Sentiment"].mean()
             if avg_sent >= 0.05:
                 sentiment_label = "Positive"
@@ -135,17 +156,15 @@ if st.button("Search Reddit"):
 
             st.metric("Average Sentiment", f"{avg_sent:.2f}", delta=sentiment_label)
 
+            # Explanation
             with st.expander("ℹ️ What does this sentiment score mean?"):
                 st.markdown("""
 **VADER Sentiment Analysis (Compound Score)**  
-VADER returns a score between -1 and +1:
-
 - **+0.05 to +1.0** → Positive  
 - **-0.05 to +0.05** → Neutral  
 - **-1.0 to -0.05** → Negative  
 
-The model is tuned for social media language including slang, caps, emojis, and punctuation.
-
+VADER is tuned for social media text and understands slang, emojis, caps, and punctuation.  
 [Learn more →](https://arxiv.org/abs/1406.2416)
 """)
 
@@ -165,7 +184,7 @@ The model is tuned for social media language including slang, caps, emojis, and 
             else:
                 st.info("Not enough related words to generate pie chart.")
 
-            # CSV export
+            # CSV download
             csv = df.to_csv(index=False).encode("utf-8")
             st.download_button("Download CSV", csv, "reddit_sentiment_results.csv", "text/csv")
 
