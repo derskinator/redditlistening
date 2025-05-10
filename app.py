@@ -8,7 +8,7 @@ from collections import Counter
 import nltk
 import re
 
-# Setup
+# Download NLTK stopwords
 nltk.download("stopwords", quiet=True)
 from nltk.corpus import stopwords
 stop_words = set(stopwords.words("english"))
@@ -31,7 +31,7 @@ with st.sidebar:
     start_date = st.date_input("Start date", value=min_date, min_value=min_date, max_value=today)
     end_date = st.date_input("End date", value=today, min_value=min_date, max_value=today)
 
-# Reddit credentials
+# Reddit API credentials
 client_id = st.secrets["client_id"]
 client_secret = st.secrets["client_secret"]
 user_agent = "reddit-sentiment-listener"
@@ -149,12 +149,12 @@ The model is tuned for social media language including slang, caps, emojis, and 
 [Learn more →](https://arxiv.org/abs/1406.2416)
 """)
 
-            # Top 15 related words pie chart
-            st.write("### Top 15 Related Words (Pie Chart)")
+            # Top 10 related words pie chart
+            st.write("### Top 10 Related Words (Pie Chart)")
             all_text = " ".join(df["Text"]).lower()
             words = re.findall(r'\b[a-z]{3,}\b', all_text)
             filtered_words = [w for w in words if w not in stop_words and w not in search_words]
-            top_words = Counter(filtered_words).most_common(15)
+            top_words = Counter(filtered_words).most_common(10)
 
             if top_words:
                 labels, counts = zip(*top_words)
