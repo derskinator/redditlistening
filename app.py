@@ -2,10 +2,16 @@ import streamlit as st
 import praw
 import pandas as pd
 import matplotlib.pyplot as plt
-from wordcloud import WordCloud
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from datetime import datetime, timedelta
+from collections import Counter
+import nltk
 import re
+
+# Setup
+nltk.download("stopwords", quiet=True)
+from nltk.corpus import stopwords
+stop_words = set(stopwords.words("english"))
 
 # Initialize VADER
 sia = SentimentIntensityAnalyzer()
@@ -13,7 +19,7 @@ sia = SentimentIntensityAnalyzer()
 st.set_page_config(page_title="Reddit Sentiment Scanner", layout="wide")
 st.title("🕵️ Reddit Social Listening with VADER Sentiment")
 
-# Sidebar
+# Sidebar inputs
 with st.sidebar:
     st.header("Search Settings")
     query = st.text_input("Exact keyword or phrase", "donald trump")
@@ -25,7 +31,7 @@ with st.sidebar:
     start_date = st.date_input("Start date", value=min_date, min_value=min_date, max_value=today)
     end_date = st.date_input("End date", value=today, min_value=min_date, max_value=today)
 
-# Reddit API credentials
+# Reddit credentials
 client_id = st.secrets["client_id"]
 client_secret = st.secrets["client_secret"]
 user_agent = "reddit-sentiment-listener"
@@ -41,12 +47,13 @@ if st.button("Search Reddit"):
         st.error("Please enter a subreddit name.")
         st.stop()
 
-    st.info("Scanning titles, bodies, and comments for exact phrase matches...")
+    st.info("Scanning posts and comments...")
 
     start_ts = datetime.combine(start_date, datetime.min.time()).timestamp()
     end_ts = datetime.combine(end_date, datetime.max.time()).timestamp()
     phrase = query.lower().strip()
     pattern = rf"\b{re.escape(phrase)}\b"
+    search_words = set(phrase.lower().split())
 
     data = []
     post_count = 0
@@ -117,9 +124,8 @@ if st.button("Search Reddit"):
             st.success(f"Displaying {len(df)} results.")
             st.dataframe(df[["Date", "Subreddit", "Mention Type", "Text", "Sentiment", "URL"]])
 
+            # Average sentiment
             avg_sent = df["Sentiment"].mean()
-
-            # Label sentiment
             if avg_sent >= 0.05:
                 sentiment_label = "Positive"
             elif avg_sent <= -0.05:
@@ -129,7 +135,6 @@ if st.button("Search Reddit"):
 
             st.metric("Average Sentiment", f"{avg_sent:.2f}", delta=sentiment_label)
 
-            # Expandable explanation
             with st.expander("ℹ️ What does this sentiment score mean?"):
                 st.markdown("""
 **VADER Sentiment Analysis (Compound Score)**  
@@ -139,25 +144,30 @@ VADER returns a score between -1 and +1:
 - **-0.05 to +0.05** → Neutral  
 - **-1.0 to -0.05** → Negative  
 
-The score is based on social-media-tuned rules that handle:
-- Slang, caps, emojis, punctuation, negation
-- Works well on Reddit/Twitter-style text
+The model is tuned for social media language including slang, caps, emojis, and punctuation.
 
-[Learn more about VADER →](https://arxiv.org/abs/1406.2416)
+[Learn more →](https://arxiv.org/abs/1406.2416)
 """)
 
-            # Word Cloud
-            st.write("### Word Cloud of Matched Text")
-            all_text = " ".join(df["Text"])
-            wc = WordCloud(width=800, height=400, background_color="white").generate(all_text)
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.imshow(wc, interpolation="bilinear")
-            ax.axis("off")
-            st.pyplot(fig)
+            # Top 15 related words pie chart
+            st.write("### Top 15 Related Words (Pie Chart)")
+            all_text = " ".join(df["Text"]).lower()
+            words = re.findall(r'\b[a-z]{3,}\b', all_text)
+            filtered_words = [w for w in words if w not in stop_words and w not in search_words]
+            top_words = Counter(filtered_words).most_common(15)
 
-            # CSV Download
+            if top_words:
+                labels, counts = zip(*top_words)
+                fig, ax = plt.subplots()
+                ax.pie(counts, labels=labels, autopct="%1.1f%%", startangle=140)
+                ax.axis("equal")
+                st.pyplot(fig)
+            else:
+                st.info("Not enough related words to generate pie chart.")
+
+            # CSV export
             csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv, "reddit_sentiment_vader.csv", "text/csv")
+            st.download_button("Download CSV", csv, "reddit_sentiment_results.csv", "text/csv")
 
     except Exception as e:
         st.error(f"Reddit API error: {e}")
