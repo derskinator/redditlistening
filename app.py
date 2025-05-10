@@ -16,6 +16,8 @@ with st.sidebar:
     query = st.text_input("Keyword or phrase", "rinsekit")
     subreddit = st.text_input("Subreddit (optional)", "camping")
     post_limit = st.slider("Number of posts to fetch", 10, 100, 50)
+    start_date = st.date_input("Start date", value=datetime(2024, 1, 1))
+    end_date = st.date_input("End date", value=datetime.today())
 
 # Load Reddit credentials from secrets
 client_id = st.secrets["client_id"]
@@ -38,19 +40,24 @@ if st.button("Search Reddit"):
         posts = subreddit_obj.search(query, sort="new", limit=post_limit)
         data = []
 
+        # Convert to timestamps for filtering
+        start_timestamp = datetime.combine(start_date, datetime.min.time()).timestamp()
+        end_timestamp = datetime.combine(end_date, datetime.max.time()).timestamp()
+
         for post in posts:
-            title = post.title
-            sentiment = TextBlob(title).sentiment.polarity
-            data.append({
-                "Title": title,
-                "Sentiment": sentiment,
-                "Subreddit": post.subreddit.display_name,
-                "Date": datetime.fromtimestamp(post.created_utc),
-                "URL": f"https://reddit.com{post.permalink}"
-            })
+            if start_timestamp <= post.created_utc <= end_timestamp:
+                title = post.title
+                sentiment = TextBlob(title).sentiment.polarity
+                data.append({
+                    "Title": title,
+                    "Sentiment": sentiment,
+                    "Subreddit": post.subreddit.display_name,
+                    "Date": datetime.fromtimestamp(post.created_utc),
+                    "URL": f"https://reddit.com{post.permalink}"
+                })
 
         if not data:
-            st.warning("No posts found.")
+            st.warning("No posts found in selected date range.")
         else:
             df = pd.DataFrame(data)
             st.success(f"Found {len(df)} posts.")
