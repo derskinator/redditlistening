@@ -3,35 +3,32 @@ import praw
 import pandas as pd
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from datetime import datetime, timedelta
-import nltk
 import re
 
-# Download VADER lexicon silently
-nltk.download("vader_lexicon", quiet=True)
+# Initialize VADER
 sia = SentimentIntensityAnalyzer()
 
-# Streamlit config
-st.set_page_config(page_title="Reddit Listener (VADER)", layout="wide")
-st.title("🕵️ Reddit Social Listening with Improved Sentiment (VADER)")
+st.set_page_config(page_title="Reddit Sentiment Scanner", layout="wide")
+st.title("🕵️ Reddit Social Listening with VADER Sentiment")
 
-# Sidebar inputs
+# Sidebar
 with st.sidebar:
     st.header("Search Settings")
     query = st.text_input("Exact keyword or phrase", "donald trump")
     subreddit = st.text_input("Subreddit (e.g., 'politics')", "politics")
-    post_limit = st.slider("Number of recent posts to scan", 10, 250, 100)
+    post_limit = st.slider("Number of posts to scan", 10, 250, 100)
 
     today = datetime.today()
     min_date = today - timedelta(days=7)
-    start_date = st.date_input("Start date (max 7 days ago)", value=min_date, min_value=min_date, max_value=today)
+    start_date = st.date_input("Start date", value=min_date, min_value=min_date, max_value=today)
     end_date = st.date_input("End date", value=today, min_value=min_date, max_value=today)
 
-# Reddit credentials
+# Reddit API credentials
 client_id = st.secrets["client_id"]
 client_secret = st.secrets["client_secret"]
-user_agent = "reddit-social-listener"
+user_agent = "reddit-sentiment-listener"
 
 reddit = praw.Reddit(
     client_id=client_id,
@@ -41,10 +38,10 @@ reddit = praw.Reddit(
 
 if st.button("Search Reddit"):
     if not subreddit.strip():
-        st.error("Please enter a subreddit (e.g., 'news', 'politics').")
+        st.error("Please enter a subreddit name.")
         st.stop()
 
-    st.info("Scanning posts and comments using VADER sentiment...")
+    st.info("Scanning titles, bodies, and comments for exact phrase matches...")
 
     start_ts = datetime.combine(start_date, datetime.min.time()).timestamp()
     end_ts = datetime.combine(end_date, datetime.max.time()).timestamp()
@@ -81,47 +78,73 @@ if st.button("Search Reddit"):
 
             # Body match
             if re.search(pattern, body.lower()):
-                text_excerpt = body[:300] + "..." if len(body) > 300 else body
+                excerpt = body[:300] + "..." if len(body) > 300 else body
                 score = sia.polarity_scores(body)["compound"]
                 match_count += 1
                 data.append({
                     "Mention Type": "Body",
-                    "Text": text_excerpt,
+                    "Text": excerpt,
                     "Sentiment": score,
                     "Subreddit": post.subreddit.display_name,
                     "Date": datetime.fromtimestamp(post_time),
                     "URL": f"https://reddit.com{post.permalink}"
                 })
 
-            # Comment match
+            # Comments
             post.comments.replace_more(limit=0)
             for comment in post.comments.list():
                 if not (start_ts <= comment.created_utc <= end_ts):
                     continue
                 if re.search(pattern, comment.body.lower()):
-                    text_excerpt = comment.body[:300] + "..." if len(comment.body) > 300 else comment.body
+                    excerpt = comment.body[:300] + "..." if len(comment.body) > 300 else comment.body
                     score = sia.polarity_scores(comment.body)["compound"]
                     match_count += 1
                     data.append({
                         "Mention Type": "Comment",
-                        "Text": text_excerpt,
+                        "Text": excerpt,
                         "Sentiment": score,
                         "Subreddit": post.subreddit.display_name,
                         "Date": datetime.fromtimestamp(comment.created_utc),
                         "URL": f"https://reddit.com{comment.permalink}"
                     })
 
-        st.write(f"✅ Scanned {post_count} posts. Found {match_count} matches.")
+        st.write(f"✅ Scanned {post_count} posts. Found {match_count} exact phrase matches.")
 
         if not data:
-            st.warning("No exact matches found in this 7-day window.")
+            st.warning("No matches found in the selected date range.")
         else:
             df = pd.DataFrame(data)
-            st.success(f"Displaying {len(df)} matches.")
+            st.success(f"Displaying {len(df)} results.")
             st.dataframe(df[["Date", "Subreddit", "Mention Type", "Text", "Sentiment", "URL"]])
 
             avg_sent = df["Sentiment"].mean()
-            st.metric("Average Sentiment (VADER)", f"{avg_sent:.2f}")
+
+            # Label sentiment
+            if avg_sent >= 0.05:
+                sentiment_label = "Positive"
+            elif avg_sent <= -0.05:
+                sentiment_label = "Negative"
+            else:
+                sentiment_label = "Neutral"
+
+            st.metric("Average Sentiment", f"{avg_sent:.2f}", delta=sentiment_label)
+
+            # Expandable explanation
+            with st.expander("ℹ️ What does this sentiment score mean?"):
+                st.markdown("""
+**VADER Sentiment Analysis (Compound Score)**  
+VADER returns a score between -1 and +1:
+
+- **+0.05 to +1.0** → Positive  
+- **-0.05 to +0.05** → Neutral  
+- **-1.0 to -0.05** → Negative  
+
+The score is based on social-media-tuned rules that handle:
+- Slang, caps, emojis, punctuation, negation
+- Works well on Reddit/Twitter-style text
+
+[Learn more about VADER →](https://arxiv.org/abs/1406.2416)
+""")
 
             # Word Cloud
             st.write("### Word Cloud of Matched Text")
@@ -132,11 +155,9 @@ if st.button("Search Reddit"):
             ax.axis("off")
             st.pyplot(fig)
 
-            # Export
+            # CSV Download
             csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", csv, "reddit_vader_sentiment.csv", "text/csv")
+            st.download_button("Download CSV", csv, "reddit_sentiment_vader.csv", "text/csv")
 
     except Exception as e:
         st.error(f"Reddit API error: {e}")
-
-
