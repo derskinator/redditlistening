@@ -1,7 +1,7 @@
 streamlit
-praw
 pandas
 matplotlib
 wordcloud
-textblob
 nltk
+praw
+vaderSentiment
